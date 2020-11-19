@@ -1,11 +1,11 @@
 
 """
-機械学習による異音検知スクリプト プロトタイプ2020年型 Ver:α0.9
+機械学習による異音検知スクリプト プロトタイプ2020年型 Ver:α0.91
 """
 
 #%%
 # cording = UTF-8
-import os,wave,re,random,copy,datetime,configparser #標準ライブラリ
+import os,wave,re,random,copy,time,datetime,configparser #標準ライブラリ
 import scipy,pyaudio,sklearn,joblib    #サードパーティライブラリ
 import numpy as np
 import pandas as pd
@@ -30,6 +30,7 @@ print ("joblib version:{0}".format(joblib.__version__))
 #録音関連
 bitrate = pyaudio.paInt16
 sr = 22050  #サンプリングレート 22050推奨
+r_wait_length = 22 #録音開始までのウェイト時間
 rec_length = 3  #録音時間(秒)
 a_index = None
 disp_spg = False    #録音後にスペクトラムを表示するかどうか Falseだと波形表示
@@ -66,7 +67,7 @@ class Init_val:
             print("Created a directory:{0}".format(target_dir))
 
     #設定値のセット
-    def def_ini(self,bitrate,sr,rec_length,a_index,disp_spg,aug_amount,
+    def def_ini(self,bitrate,sr,r_wait_length,rec_length,a_index,disp_spg,aug_amount,
     exp_ver,train_file,test_file,base_dir,data_dir,save_dir,model_dir,log_dir):
         x = configparser.ConfigParser()
 
@@ -81,6 +82,7 @@ class Init_val:
         x["Rec_param"] = {
             "bitrate" : bitrate,
             "sr" : sr,
+            "r_wait_length" : r_wait_length,
             "rec_length" : rec_length,
             "disp_spg" : disp_spg
         }
@@ -119,6 +121,7 @@ class Init_val:
     def set_ini(self,cfg):
         bitrate = cfg.getint("Rec_param","bitrate")
         sr = cfg.getint("Rec_param","sr")
+        r_wait_length = cfg.getint("Rec_param","r_wait_length")
         rec_length = cfg.getint("Rec_param","rec_length")
         disp_spg = cfg.getboolean("Rec_param","disp_spg")
 
@@ -141,7 +144,7 @@ class Init_val:
         else:
             a_index = int(a_index)
 
-        return bitrate,sr,rec_length,a_index,disp_spg,aug_amount,\
+        return bitrate,sr,r_wait_length,rec_length,a_index,disp_spg,aug_amount,\
         exp_ver,train_file,test_file,base_dir,data_dir,save_dir,model_dir,log_dir
 
 #オーディオインデックス定義
@@ -166,7 +169,7 @@ class Elem_rec:
         pass
     
     #録音を行う
-    def proc_rec(self,bitrate,sr,rec_length,a_index):
+    def proc_rec(self,bitrate,sr,r_wait_length,rec_length,a_index):
         p = pyaudio.PyAudio()
 
         #ストリームの開始
@@ -176,6 +179,11 @@ class Elem_rec:
                         input = True,
                         input_device_index = a_index,
                         frames_per_buffer = 1024)   #ストリームサイズ1204固定
+        
+        #ウェイトをかける
+        print("Wating for recording to start...")
+        for i in range(r_wait_length):
+            time.sleep(1)
         
         #フレームサイズごとに音声を録音
         print("Now Recording...")
@@ -199,7 +207,11 @@ class Elem_rec:
     #波形の描画
     def vis_waveform(self,waveform):
         plt.plot(waveform)
+        plt.ion()
         plt.show()
+        plt.pause(5)
+        plt.clf()
+        plt.close()
 
     #スペクトログラムの描画(デフォルトはオフ)
     def vis_spectrogram(self,waveform,sr):
@@ -216,7 +228,11 @@ class Elem_rec:
         plt.pcolormesh(x,norm = LogNorm())
         plt.colorbar()
         plt.yscale("Log")
+        plt.ion()
         plt.show()
+        plt.pause(5)
+        plt.clf()
+        plt.close()
 
     #Wavファイルへの書き出し
     def save_rec(self,bulkwave,save_dir,bitrate,sr):
@@ -560,7 +576,7 @@ class Bootup(Init_val,Def_index):
         pass
 
     #ワークフォルダの生成と初期設定値の記憶・読み込み
-    def Bootinit(self,bitrate,sr,rec_length,a_index,disp_spg,aug_amount,
+    def Bootinit(self,bitrate,sr,r_wait_length,rec_length,a_index,disp_spg,aug_amount,
     exp_ver,train_file,test_file,base_dir,data_dir,save_dir,model_dir,log_dir):
         #データファイル関係の検索と生成
         super().path_exist(data_dir)
@@ -576,7 +592,7 @@ class Bootup(Init_val,Def_index):
         if os.path.exists("./proto2020.ini"):
             #iniファイルが存在する場合グローバル変数をiniファイル内容で上書き
             cfg = super().load_ini()
-            bitrate,sr,rec_length,a_index,disp_spg,aug_amount,\
+            bitrate,sr,r_wait_length,rec_length,a_index,disp_spg,aug_amount,\
                 exp_ver,train_file,test_file,base_dir,data_dir,save_dir,\
                 model_dir,log_dir =super().set_ini(cfg)
             p = pyaudio.PyAudio()
@@ -588,13 +604,13 @@ class Bootup(Init_val,Def_index):
             #オーディオインデックスを選択後、変数をiniファイルに格納する
             a_index = super().select_indexes()  #インデックスの選択
             cfg = super().def_ini(
-                bitrate,sr,rec_length,a_index,disp_spg,aug_amount,
+                bitrate,sr,r_wait_length,rec_length,a_index,disp_spg,aug_amount,
                 exp_ver,train_file,test_file,base_dir,data_dir,save_dir,
                 model_dir,log_dir)
             super().save_ini(cfg)
             print("Saved default settings: ./proto2020.ini")
 
-        return bitrate,sr,rec_length,a_index,disp_spg,aug_amount,\
+        return bitrate,sr,r_wait_length,rec_length,a_index,disp_spg,aug_amount,\
             exp_ver,train_file,test_file,base_dir,data_dir,save_dir,\
             model_dir,log_dir
 
@@ -603,10 +619,10 @@ class Audio_Recoder(Elem_rec):
     def __init__(self):
         pass
 
-    def rec_audio(self,bitrate,sr,rec_length,a_index,save_dir):
+    def rec_audio(self,bitrate,sr,r_wait_length,rec_length,a_index,save_dir):
         #録音処理
         x = super().proc_rec(
-            bitrate,sr,rec_length,a_index
+            bitrate,sr,r_wait_length,rec_length,a_index
         )
 
        #録音結果の表示
@@ -762,9 +778,9 @@ class Proba_pred(Elem_rec,Elem_aug,Elem_errorcalc,Elem_predictor,Elem_visualizer
     def __init__(self):
         pass
 
-    def proba_judge(self,bitrate,sr,rec_length,a_index,model,thresh):
+    def proba_judge(self,bitrate,sr,r_wait_length,rec_length,a_index,model,thresh):
         #マイクから収音する
-        x = super().proc_rec(bitrate,sr,rec_length,a_index)
+        x = super().proc_rec(bitrate,sr,r_wait_length,rec_length,a_index)
     
         #レコーディングデータのコピーNumpy配列に変換
         valid_wav = np.frombuffer(
@@ -795,10 +811,11 @@ class Proba_pred(Elem_rec,Elem_aug,Elem_errorcalc,Elem_predictor,Elem_visualizer
 
 ###################################UI関連##################################
 class Menus(Audio_Recoder,Proc_Dataset,Pretraining,Threh_set,Proba_pred):
-    def __init__(self,bitrate,sr,rec_length,a_index,disp_spg,aug_amount,
+    def __init__(self,bitrate,sr,r_wait_length,rec_length,a_index,disp_spg,aug_amount,
     exp_ver,train_file,test_file,base_dir,data_dir,save_dir,model_dir,log_dir):
         self.bitrate = bitrate
         self.sr = sr
+        self.r_wait_length = r_wait_length
         self.rec_length = rec_length
         self.a_index = a_index
         self.disp_spg = disp_spg
@@ -827,7 +844,7 @@ class Menus(Audio_Recoder,Proc_Dataset,Pretraining,Threh_set,Proba_pred):
             m0_key = input("Do you want to record? [0:yes 1:no]")
             if m0_key == "0":
                 super().rec_audio(
-                    self.bitrate,self.sr,self.rec_length,self.a_index,
+                    self.bitrate,self.sr,self.r_wait_length,self.rec_length,self.a_index,
                     self.save_dir
                     )
                 m0_key = None
@@ -913,7 +930,8 @@ class Menus(Audio_Recoder,Proc_Dataset,Pretraining,Threh_set,Proba_pred):
 
     #メニュー2 判定の実施
     def m2_judgement(self,model,thresh):
-        super().proba_judge(bitrate,sr,rec_length,a_index,model,thresh)
+        super().proba_judge(bitrate,sr,r_wait_length,rec_length,a_index,
+        model,thresh)
 
 #%%
 #################################メイン処理#################################
@@ -923,28 +941,32 @@ if __name__ =="__main__":
     os.system("cls")    #画面をクリア
     os.chdir(base_dir)  #カレントディレクトリを強制指定
     x = Bootup()
-    bitrate,sr,rec_length,a_index,disp_spg,aug_amount,\
+    bitrate,sr,r_wait_length,rec_length,a_index,disp_spg,aug_amount,\
     exp_ver,train_file,test_file,base_dir,data_dir,save_dir,\
     model_dir,log_dir = \
     x.Bootinit(
-        bitrate,sr,rec_length,a_index,disp_spg,aug_amount,\
+        bitrate,sr,r_wait_length,rec_length,a_index,disp_spg,aug_amount,\
         exp_ver,train_file,test_file,base_dir,data_dir,save_dir,\
         model_dir,log_dir)
     del x
 
     #メインメニュー表示
     m_menu = Menus(
-        bitrate,sr,rec_length,a_index,disp_spg,aug_amount,
+        bitrate,sr,r_wait_length,rec_length,a_index,disp_spg,aug_amount,
     exp_ver,train_file,test_file,base_dir,data_dir,save_dir,
     model_dir,log_dir)
-    valid_keys = ("0","1","2","8") #Quit以外の有効なメニュー番号
+    # valid_keys = ("0","1","2","8") #Quit以外の有効なメニュー番号
     u_const_keys = ("8")    #工事中のメニュー番号
     main_key = None
     while main_key == None:
         m_menu.main_manu()
         main_key = input("Select an operating mode:")
         #録音モード
-        if main_key =="0":
+        if main_key in u_const_keys:  #未実装機能に対して工事中表示をする
+            print("\nSorry,Cullenly under construction.\n")
+            main_key = None
+        
+        elif main_key =="0":
             m_menu.m0_rec()
             main_key = None
 
@@ -972,10 +994,6 @@ if __name__ =="__main__":
             del m2_key
             main_key = None
 
-        elif main_key in u_const_keys:  #未実装機能に対して工事中表示をする
-            print("\nSorry,Cullenly under construction.\n")
-            main_key = None
-
         elif main_key == "9":
             #del m_menu             #デバッグ用にコメントアウトしておく
             print("\nQuit.\n")
@@ -994,6 +1012,11 @@ if __name__ =="__main__":
 やること
 - セッティングモードの実装
 - デバッグモードの切り替え機能 (終了時にm_menuを削除しない)
+
+20201119
+    録音トリガーオン後、r_wait_lengthの時間分待機するように
+    録音終了後、5秒間波形を表示し、セーブ処理に移行するように
+    メインメニューのキー判定を未定義キー優先に(ばかよけ対応)
 
 20200921
     プレトレーニング及び確率判定を活性化
