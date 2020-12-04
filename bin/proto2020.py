@@ -1,6 +1,6 @@
 
 """
-機械学習による異音検知スクリプト プロトタイプ2020年型 Ver:α0.91
+機械学習による異音検知スクリプト プロトタイプ2020年型 Ver:α0.92
 """
 
 #%%
@@ -30,7 +30,7 @@ print ("joblib version:{0}".format(joblib.__version__))
 #録音関連
 bitrate = pyaudio.paInt16
 sr = 22050  #サンプリングレート 22050推奨
-r_wait_length = 22 #録音開始までのウェイト時間
+r_wait_length = 5 #録音開始までのウェイト時間
 rec_length = 3  #録音時間(秒)
 a_index = None
 disp_spg = False    #録音後にスペクトラムを表示するかどうか Falseだと波形表示
@@ -207,13 +207,14 @@ class Elem_rec:
     #波形の描画
     def vis_waveform(self,waveform):
         plt.plot(waveform)
+        plt.ylim(-1,1)
         plt.ion()
         plt.show()
         plt.pause(5)
         plt.clf()
         plt.close()
 
-    #スペクトログラムの描画(デフォルトはオフ)
+    #スペクトログラムの描画(デフォルトはオフ…重いので)
     def vis_spectrogram(self,waveform,sr):
         x = np.arange(0)
         freq,time,x =s_signal.spectrogram(
@@ -277,19 +278,46 @@ class Elem_aug:
 
         return x
 
-    #オーディオファイルの読み込み numpy配列として読み込む
+    #オーディオファイルの読み込み wave_readオブジェクトを返す
     def load_wav(self,dir,file):
         #初期化
         x = np.arange(0)
 
-        bulkwave = wave.open(os.path.join(dir,file),"rb").readframes(-1)
-        x = np.frombuffer(
-            bulkwave,dtype = "int16"
-        ) / float(
-            (np.power(2,16) /2) -1
-        )
+        #wave.openで読み出されるのはバイナリなので形式変換する
+        x = wave.open(os.path.join(dir,file),"rb").readframes(-1)
 
-        del bulkwave
+        # 以下旧コード 不要が確認できたら消す
+        # bulkwave = wave.open(os.path.join(dir,file),"rb").readframes(-1)
+        # x = np.frombuffer(
+        #    bulkwave,dtype = "int16"
+        # ) / float(
+        #     (np.power(2,16) /2) -1
+        # )
+
+        # del bulkwave
+        return x
+
+    #wave.readオブジェクトからNumpy配列への変換 int16
+    def wr_to_np(self,wr_obj):
+        x = np.arange(0)
+
+        x = np.frombuffer(wr_obj,dtype = "int16")
+
+        return x
+
+    #ノーマライズ float64に形式変換
+    def proc_norm(self,wav):
+        x = np.arange(0)
+        
+        #元データの最大宰相を比較し、絶対値の大きい側基準でノーマライズ
+        if abs(max(wav)) > abs(min(wav)):
+            x = wav/ max(wav) * np.iinfo(np.int16).max
+        else:
+            x = wav / min(wav) * np.iinfo(np.int16).min
+    
+        #-1～1の範囲にスケーリングする
+        x = x/ float((np.power(2,16) /2) -1)
+
         return x
 
     #Augmentation処理 ノイズの追加
@@ -469,7 +497,7 @@ class Elem_predictor:
         return x
 
     #確率評価
-    def eval_proba(self,y_pred,mse,thresh):
+    def eval_proba(self,y_pred,mse,thresh,wave):
         if np.count_nonzero(y_pred)/len(y_pred) >0.5:
             result = "NG"
             print("NG(True)")
@@ -480,10 +508,20 @@ class Elem_predictor:
             np.mean(mse),thresh))
 
         #閾値と判定結果の可視化
+        if result == "OK":
+            col = "#0000ff"
+        else:
+            col = "#ff0000"
+
+        plt.subplot(121)
+        plt.plot(wave,color = col)
+        plt.ylim(-1,1)
+        plt.title("Waveform")
+        plt.subplot(122)
         plt.scatter(
             np.arange(len(y_pred)),
             mse,
-            color = "#ff0000",
+            color = col,
             linestyle='None'
             )
         plt.plot(
@@ -495,9 +533,11 @@ class Elem_predictor:
         plt.ylabel("MSE")
         plt.yscale("Log")
         plt.title("Result :" + str(result) + " mean MSE = " +str(np.mean(mse)))
+        plt.ion()
         plt.show()
-
-
+        plt.pause(5)
+        plt.clf()
+        plt.close()
 
     #モデルの評価
     def model_evaluate(self,y_true,y_pred):
@@ -625,12 +665,12 @@ class Audio_Recoder(Elem_rec):
             bitrate,sr,r_wait_length,rec_length,a_index
         )
 
-       #録音結果の表示
+       #録音結果の表示 ノーマライズは行わず直接スケーリングする
         form_wave = np.frombuffer(
             x,dtype="int16"
             ) / float(
                 (np.power(2, 16) / 2) - 1
-                )   #データ表示用にNumpy配列に変換
+                )
         if disp_spg == False:
             super().vis_waveform(form_wave)
         else:
@@ -653,7 +693,11 @@ class Proc_Dataset(Elem_aug):
         counter = 0
         #ウェーブリストを変数としてforループを組む
         for i in wave_list:
-            wav = super().load_wav(dir,i)
+            
+            #波形を読み込んでノーマライズ
+            wav = super().proc_norm(super().wr_to_np(super().load_wav(dir,i)))
+
+            #Augmentation処理
             auged_spg,count = super().proc_aug(wav,sr,aug_amount)
             del wav
 
@@ -782,12 +826,19 @@ class Proba_pred(Elem_rec,Elem_aug,Elem_errorcalc,Elem_predictor,Elem_visualizer
         #マイクから収音する
         x = super().proc_rec(bitrate,sr,r_wait_length,rec_length,a_index)
     
-        #レコーディングデータのコピーNumpy配列に変換
-        valid_wav = np.frombuffer(
-            x,dtype = "int16"
-        ) / float(
-            (np.power(2,16) /2) -1
-        )
+        #レコーディングデータのコピー2種類を用意 検証用と表示用
+        valid_wav = super().proc_norm(super().wr_to_np(x))
+        form_wave = np.frombuffer(
+            x,dtype="int16"
+            ) / float(
+                (np.power(2, 16) / 2) - 1
+                )
+
+        # valid_wav = np.frombuffer(
+        #    x,dtype = "int16"
+        # ) / float(
+        #     (np.power(2,16) /2) -1
+        # )
         
         #Augmentationする 回数は100回
         X_unknown,count = super().proc_aug(valid_wav,sr,100)
@@ -799,8 +850,8 @@ class Proba_pred(Elem_rec,Elem_aug,Elem_errorcalc,Elem_predictor,Elem_visualizer
         y_pred = super().mse_predictor(mse,thresh)
         
         #100個の推論からの確率で最終判定を行う
-        super().eval_proba(y_pred,mse,thresh)
-
+        super().eval_proba(y_pred,mse,thresh,form_wave)
+        del form_wave
 
         '''
         ・思っていた判定と異なっていたら
@@ -1013,12 +1064,19 @@ if __name__ =="__main__":
 - セッティングモードの実装
 - デバッグモードの切り替え機能 (終了時にm_menuを削除しない)
 
-20201119
+20201205 ｖ0.92
+    入力信号のレベルが低い際に特徴量が埋没しないよう、
+        データセット生成前に波形をノーマライズするように
+    推論結果で波形を表示するように
+    推論結果の波形とMSEを、判定結果により色が変わるように(判りにくいので)
+    録音後や推論後の波形表示時、レンジを正しく(レベルが判るように)表示するように
+
+20201119　v0.91
     録音トリガーオン後、r_wait_lengthの時間分待機するように
     録音終了後、5秒間波形を表示し、セーブ処理に移行するように
     メインメニューのキー判定を未定義キー優先に(ばかよけ対応)
 
-20200921
+20200921 v0.90
     プレトレーニング及び確率判定を活性化
 
 20200816
