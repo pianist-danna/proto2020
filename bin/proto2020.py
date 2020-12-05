@@ -286,15 +286,6 @@ class Elem_aug:
         #wave.openで読み出されるのはバイナリなので形式変換する
         x = wave.open(os.path.join(dir,file),"rb").readframes(-1)
 
-        # 以下旧コード 不要が確認できたら消す
-        # bulkwave = wave.open(os.path.join(dir,file),"rb").readframes(-1)
-        # x = np.frombuffer(
-        #    bulkwave,dtype = "int16"
-        # ) / float(
-        #     (np.power(2,16) /2) -1
-        # )
-
-        # del bulkwave
         return x
 
     #wave.readオブジェクトからNumpy配列への変換 int16
@@ -833,12 +824,6 @@ class Proba_pred(Elem_rec,Elem_aug,Elem_errorcalc,Elem_predictor,Elem_visualizer
             ) / float(
                 (np.power(2, 16) / 2) - 1
                 )
-
-        # valid_wav = np.frombuffer(
-        #    x,dtype = "int16"
-        # ) / float(
-        #     (np.power(2,16) /2) -1
-        # )
         
         #Augmentationする 回数は100回
         X_unknown,count = super().proc_aug(valid_wav,sr,100)
