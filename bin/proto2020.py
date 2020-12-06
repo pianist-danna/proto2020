@@ -107,13 +107,24 @@ class Init_val:
 
     #iniファイルの保存
     def save_ini(self,cfg):
-        with open("proto2020.ini","w") as cfgfile:
+        with open(os.path.splitext(
+            os.path.basename(__file__))[0] + ".ini"
+            ,"w") as cfgfile:
             cfg.write(cfgfile)
 
     #iniファイルの読み出し
     def load_ini(self):
         x = configparser.ConfigParser()
-        x.read("./proto2020.ini")
+        x.read(
+            os.path.join(
+                "./",str(
+                    os.path.splitext(
+                        os.path.basename(__file__)
+                    )[0] + ".ini"
+                )
+            )
+        )
+        # x.read("./proto2020.ini")
 
         return x
 
@@ -160,7 +171,6 @@ class Def_index:
             print(i,p.get_device_info_by_index(i).get("name"),sep = " - ")
         x = int(input("Select Audio device Index No."))
         print("***Selected audio device #{0}.***".format(x))
-        del p
         return x
 
 #録音関連
@@ -170,9 +180,9 @@ class Elem_rec:
     
     #録音を行う
     def proc_rec(self,bitrate,sr,r_wait_length,rec_length,a_index):
-        p = pyaudio.PyAudio()
 
         #ストリームの開始
+        p = pyaudio.PyAudio()
         stream = p.open(format = bitrate,
                         channels = 1,   #モノラル
                         rate = sr,
@@ -939,10 +949,6 @@ class Menus(Audio_Recoder,Proc_Dataset,Pretraining,Threh_set,Proba_pred):
                 X_train,X_test,y_test = super().load_dataset(self.data_dir,
                 self.train_file,self.test_file
                 )
-            #トレーニングデータの形状を取得し、データを1次元配列に成形
-            #X_shape = X_train.shape[1:]
-            #X_train = X_train.reshape(len(X_train),-1)
-            #X_test = X_test.reshape(len(X_test),-1)
             
             #プレトレーニング
             model = super().pretrain(X_train,exp_ver)
@@ -955,12 +961,6 @@ class Menus(Audio_Recoder,Proc_Dataset,Pretraining,Threh_set,Proba_pred):
             #モデルの読み込み処理
             model,thresh = super().unpack_model_thresh(
                 super().model_load(model_dir))
-
-            #X_shapeを取得するために一度X_testを読み込む
-            #ld = np.load(os.path.join(data_dir,test_file))
-            #X_test = ld["X"]
-            #X_shape = X_test.shape[1:]
-            #del ld,X_test
 
         return model,thresh
 
@@ -991,7 +991,14 @@ if __name__ =="__main__":
         bitrate,sr,r_wait_length,rec_length,a_index,disp_spg,aug_amount,
     exp_ver,train_file,test_file,base_dir,data_dir,save_dir,
     model_dir,log_dir)
-    # valid_keys = ("0","1","2","8") #Quit以外の有効なメニュー番号
+
+    #モデルファイルの有無を確認し、ある場合は読み込む
+    if os.path.exists(os.path.join(model_dir,"model2020.dat")) == True:
+        model,thresh = m_menu.unpack_model_thresh(
+                m_menu.model_load(model_dir))
+    else:
+        pass
+
     u_const_keys = ("8")    #工事中のメニュー番号
     main_key = None
     while main_key == None:
@@ -1055,6 +1062,9 @@ if __name__ =="__main__":
     推論結果で波形を表示するように
     推論結果の波形とMSEを、判定結果により色が変わるように(判りにくいので)
     録音後や推論後の波形表示時、レンジを正しく(レベルが判るように)表示するように
+    生成されるiniファイルの名前が自分自身の名前に連動するように(現場対応)
+    起動時、モデルファイルがあれば自動読み込みするように(現場対応)
+    怨念のように残っていた古いコメントコードを掃除
 
 20201119　v0.91
     録音トリガーオン後、r_wait_lengthの時間分待機するように
